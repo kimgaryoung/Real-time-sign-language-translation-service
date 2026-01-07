@@ -234,8 +234,8 @@ def process_all_images(image_folder, output_base_folder):
 
 
 if __name__ == "__main__":
-    image_folder = "/Users/garyeong/project-1/직접사진제작_지문자"
-    output_base_folder = "/Users/garyeong/project-1/dataset/자체제작_사진_지문자_keypoints"
+    image_folder = "C:\Users\user\final_project\직접사진제작_지문자"
+    output_base_folder = "C:\Users\user\final_project\dataset\자체제작_사진_지문자_keypoints"
 
     if not os.path.exists(image_folder):
         print(f"[ERROR] Input folder does not exist: {image_folder}")

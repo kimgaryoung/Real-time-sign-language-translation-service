@@ -372,8 +372,8 @@ def process_all_videos(video_folder, output_base_folder, skip_mode="all"):
 
 if __name__ == "__main__":
     # 경로 설정
-    video_folder = "/Users/garyeong/Desktop/Real-time-sign-language-translation-service/data/set/가령_영상데이터"
-    output_base_folder = "/Users/garyeong/Desktop/Real-time-sign-language-translation-service/data/set/가령_영상데이터"
+    video_folder = r"C:\Users\user\Real-time-sign-language-translation-service\data\set\hyemi_video"
+    output_base_folder = r"C:\Users\user\Real-time-sign-language-translation-service\data\set\hyemi_keypoints"
 
     # ============================================================
     # 빈 프레임 필터 모드 설정 

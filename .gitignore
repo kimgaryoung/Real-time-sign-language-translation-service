@@ -1,0 +1,20 @@
+# 가상환경 (Python)
+venv/
+.venv/
+env/
+
+# Flutter/Dart 관련
+build/
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+
+# 운영체제 및 IDE 설정
+.vscode/
+.idea/
+.DS_Store
+*.log
+
+__pycache__/
+*.pyc

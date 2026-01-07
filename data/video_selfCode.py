@@ -23,8 +23,8 @@ mp_face_mesh = mp.solutions.face_mesh
 
 if __name__ == "__main__":
     # 경로 설정
-    video_folder = "/Users/garyeong/project-1/직접영상제작_단어" # 동영상 단어 경로 
-    output_base_folder = "/Users/garyeong/project-1/dataset/자체제작_단어_keypoints" 
+    video_folder = r"C:\Users\user\final_project\my_sign_data" # 동영상 단어 경로 
+    output_base_folder = r"C:\Users\user\final_project\dataset\자체제작_단어_keypoints" 
 
     # 폴더 존재 확인
     if not os.path.exists(video_folder):
