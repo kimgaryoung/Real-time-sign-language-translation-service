@@ -2,8 +2,20 @@
 직접영상제작 폴더의 동영상을 MediaPipe로 처리하여 키포인트 JSON 파일로 변환
 
 ============================================================
+[Windows  필독]
+============================================================
+1. 동영상 확장자가 .mp4인지 확인하세요.
+   - .mov 파일은 Windows에서 인식이 안 될 수 있습니다.
+   - .mov → .mp4 변환 권장 (온라인 변환기 또는 FFmpeg 사용)
+
+2. .mov 파일을 그대로 사용하려면 K-Lite Codec Pack 설치:
+   - 다운로드: https://codecguide.com/download_kl.htm
+   - "Basic" 또는 "Standard" 버전 설치 후 재부팅
+
+============================================================
 실행 방법 (터미널):
 ============================================================
+[macOS]
 1. 가상환경 활성화:
    conda activate py311_env
 
@@ -11,8 +23,13 @@
    cd /Users/garyeong/Desktop/Real-time-sign-language-translation-service/data/code
    python video_selfCode.py
 
-또는 한 줄로:
-   conda activate py311_env && python /Users/garyeong/Desktop/Real-time-sign-language-translation-service/data/code/video_selfCode.py
+[Windows]
+1. 가상환경 활성화:
+   conda activate py311_env
+
+2. 스크립트 실행:
+   cd C:\Users\사용자\Desktop\Real-time-sign-language-translation-service\data\code
+   python video_selfCode.py
 
 ============================================================
 실행 전 설정 (맨 아래 if __name__ == "__main__": 부분):
@@ -27,8 +44,31 @@ import mediapipe as mp
 import numpy as np
 import json
 import os
+import sys
 import glob
+import platform
 from pathlib import Path
+
+# ==================== Windows 호환성 설정 ====================
+def setup_windows_compatibility():
+    """Windows 환경에서의 호환성 설정"""
+    if platform.system() == 'Windows':
+        # 콘솔 한글 출력 인코딩 설정
+        if sys.stdout.encoding != 'utf-8':
+            sys.stdout.reconfigure(encoding='utf-8')
+            sys.stderr.reconfigure(encoding='utf-8')
+
+        # Windows 콘솔 코드페이지 설정 (선택적)
+        try:
+            os.system('chcp 65001 > nul 2>&1')
+        except:
+            pass
+
+    print(f"운영체제: {platform.system()}")
+    print(f"Python 인코딩: {sys.stdout.encoding}")
+
+# 시작 시 호환성 설정 실행
+setup_windows_compatibility()
 
 
 #conda activate py311_env
@@ -181,13 +221,33 @@ def process_video_to_json(video_path, output_folder, label_name, skip_mode="all"
             - "hands_or_face": 손과 얼굴 모두 없으면 건너뛰기
             - "none": 건너뛰지 않음 (모든 프레임 저장)
     """
-    # 출력 폴더 생성
-    os.makedirs(output_folder, exist_ok=True)
+    # Path 객체로 변환 (호환성)
+    output_folder = Path(output_folder)
 
-    # 동영상 열기
-    cap = cv2.VideoCapture(video_path)
+    # 출력 폴더 생성
+    output_folder.mkdir(parents=True, exist_ok=True)
+
+    # 동영상 열기 (경로를 문자열로 변환하여 호환성 확보)
+    video_path_str = str(video_path)
+
+    # Windows에서 한글 경로 처리
+    if platform.system() == 'Windows':
+        # cv2.VideoCapture가 한글 경로를 못 읽을 경우 대비
+        try:
+            cap = cv2.VideoCapture(video_path_str)
+        except:
+            # numpy를 통한 우회 방법
+            cap = cv2.VideoCapture(video_path_str, cv2.CAP_DSHOW)
+    else:
+        cap = cv2.VideoCapture(video_path_str)
+
     if not cap.isOpened():
         print(f"동영상을 열 수 없습니다: {video_path}")
+        if platform.system() == 'Windows':
+            print("  [Windows 해결 방법]")
+            print("  1. .mov 파일인 경우: K-Lite Codec Pack 설치 또는 .mp4로 변환")
+            print("  2. 한글 경로 문제: 영문 경로로 이동 후 재시도")
+            print("  3. 경로에 특수문자가 없는지 확인")
         return False
 
     # 동영상 정보
@@ -239,9 +299,9 @@ def process_video_to_json(video_path, output_folder, label_name, skip_mode="all"
 
             # JSON 파일로 저장 (OpenPose 형식: {video_id}_{frame_number}_keypoints.json)
             json_filename = f"{label_name}_{frame_idx:06d}_keypoints.json"
-            json_path = os.path.join(output_folder, json_filename)
+            json_path = output_folder / json_filename
 
-            with open(json_path, 'w', encoding='utf-8') as f:
+            with open(str(json_path), 'w', encoding='utf-8') as f:
                 json.dump(keypoint_data, f, ensure_ascii=False, indent=2)
 
             frame_idx += 1
@@ -280,9 +340,9 @@ def create_morpheme_label_file(output_folder, label_name):
 
     # 라벨 파일 저장
     label_filename = f"{label_name}_morpheme.json"
-    label_path = os.path.join(output_folder, label_filename)
+    label_path = Path(output_folder) / label_filename
 
-    with open(label_path, 'w', encoding='utf-8') as f:
+    with open(str(label_path), 'w', encoding='utf-8') as f:
         json.dump(label_data, f, ensure_ascii=False, indent=2)
 
     print(f"라벨 파일 생성: {label_filename}")
@@ -301,10 +361,18 @@ def process_all_videos(video_folder, output_base_folder, skip_mode="all"):
             - "hands_or_face": 손과 얼굴 모두 없으면 건너뛰기
             - "none": 건너뛰지 않음 (모든 프레임 저장)
     """
-    # 동영상 파일 찾기
-    video_files = glob.glob(os.path.join(video_folder, "*.mov"))
-    video_files.extend(glob.glob(os.path.join(video_folder, "*.mp4")))
-    video_files = sorted(video_files)
+    # Path 객체로 변환 (호환성)
+    video_folder = Path(video_folder)
+    output_base_folder = Path(output_base_folder)
+
+    # 동영상 파일 찾기 (Path.glob 사용으로 호환성 향상)
+    video_files = list(video_folder.glob("*.mov"))
+    video_files.extend(list(video_folder.glob("*.mp4")))
+    video_files.extend(list(video_folder.glob("*.MOV")))  # 대문자 확장자
+    video_files.extend(list(video_folder.glob("*.MP4")))
+    video_files.extend(list(video_folder.glob("*.avi")))  # AVI 지원 추가
+    video_files.extend(list(video_folder.glob("*.AVI")))
+    video_files = sorted(set(video_files))  # 중복 제거 및 정렬
 
     if not video_files:
         print(" 동영상 파일을 찾을 수 없습니다!")
@@ -332,11 +400,11 @@ def process_all_videos(video_folder, output_base_folder, skip_mode="all"):
 
     for idx, video_path in enumerate(video_files, 1):
         # 파일명에서 라벨 추출 (예: 'ㄱ.mov' → 'ㄱ')
-        filename = os.path.basename(video_path)
-        label_name = os.path.splitext(filename)[0]
+        # Path 객체 사용으로 OS 호환성 확보
+        label_name = video_path.stem  # 확장자 제외한 파일명
 
         # 출력 폴더: output_base_folder/label_name/
-        output_folder = os.path.join(output_base_folder, label_name)
+        output_folder = output_base_folder / label_name
 
         print(f"\n[{idx}/{len(video_files)}] {label_name}")
 
@@ -371,9 +439,21 @@ def process_all_videos(video_folder, output_base_folder, skip_mode="all"):
 
 
 if __name__ == "__main__":
-    # 경로 설정
-    video_folder = "/Users/garyeong/Desktop/Real-time-sign-language-translation-service/data/set/가령_영상데이터"
-    output_base_folder = "/Users/garyeong/Desktop/Real-time-sign-language-translation-service/data/set/가령_영상데이터"
+    # ============================================================
+    # 경로 설정 (운영체제에 맞게 수정하세요)
+    # ============================================================
+    if platform.system() == 'Windows':
+        # Windows 경로 예시 (본인 환경에 맞게 수정)
+        video_folder = r"C:\Users\사용자\Desktop\Real-time-sign-language-translation-service\data\set\가령_영상데이터"
+        output_base_folder = r"C:\Users\사용자\Desktop\Real-time-sign-language-translation-service\data\set\가령_영상데이터"
+    else:
+        # macOS / Linux 경로
+        video_folder = "/Users/garyeong/Desktop/Real-time-sign-language-translation-service/data/set/가령_영상데이터"
+        output_base_folder = "/Users/garyeong/Desktop/Real-time-sign-language-translation-service/data/set/가령_영상데이터"
+
+    # Path 객체로 변환 (경로 호환성 향상)
+    video_folder = Path(video_folder)
+    output_base_folder = Path(output_base_folder)
 
     # ============================================================
     # 빈 프레임 필터 모드 설정 
@@ -386,9 +466,13 @@ if __name__ == "__main__":
     skip_mode = "hands"
 
     # 폴더 존재 확인
-    if not os.path.exists(video_folder):
-        print(f" 입력 폴더가 존재하지 않습니다: {video_folder}")
-        exit(1)
+    if not video_folder.exists():
+        print(f"입력 폴더가 존재하지 않습니다: {video_folder}")
+        if platform.system() == 'Windows':
+            print("\n[Windows 사용자 안내]")
+            print("위의 경로를 본인 환경에 맞게 수정하세요.")
+            print("예: r\"C:\\Users\\본인이름\\Desktop\\...\"")
+        sys.exit(1)
 
     # 전체 동영상 처리
     process_all_videos(video_folder, output_base_folder, skip_mode)
