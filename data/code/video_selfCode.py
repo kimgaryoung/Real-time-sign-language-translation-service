@@ -302,8 +302,8 @@ def process_all_videos(video_folder, output_base_folder, skip_mode="all"):
             - "none": 건너뛰지 않음 (모든 프레임 저장)
     """
     # 동영상 파일 찾기
-    video_files = glob.glob(os.path.join(video_folder, "*.mov"))
-    video_files.extend(glob.glob(os.path.join(video_folder, "*.mp4")))
+    video_files = glob.glob(os.path.join(video_folder, "**", "*.mov"), recursive=True)
+    video_files.extend(glob.glob(os.path.join(video_folder, "**", "*.mp4"), recursive=True))
     video_files = sorted(video_files)
 
     if not video_files:
@@ -372,9 +372,8 @@ def process_all_videos(video_folder, output_base_folder, skip_mode="all"):
 
 if __name__ == "__main__":
     # 경로 설정
-    video_folder = "/Users/garyeong/Desktop/Real-time-sign-language-translation-service/data/set/가령_영상데이터"
-    output_base_folder = "/Users/garyeong/Desktop/Real-time-sign-language-translation-service/data/set/가령_영상데이터"
-
+    video_folder = r"C:\Users\yues7\OneDrive\사진\Camera Roll"
+    output_base_folder = r"C:\j\dataset\자체제작_단어_keypoints"
     # ============================================================
     # 빈 프레임 필터 모드 설정 
     # ============================================================

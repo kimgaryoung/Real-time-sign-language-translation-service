@@ -8,53 +8,16 @@ import numpy as np
 import json
 import os
 import glob
-from pathlib import Path
+import sys  # exit 사용을 위해 추가
 
-
-#conda activate py311_env
-#
-
-
-# MediaPipe 초기화
+# MediaPipe 초기화 (전역 변수 유지)
 mp_pose = mp.solutions.pose
 mp_hands = mp.solutions.hands
 mp_face_mesh = mp.solutions.face_mesh
 
-
-if __name__ == "__main__":
-    # 경로 설정
-    video_folder = "/Users/garyeong/project-1/직접영상제작_단어" # 동영상 단어 경로 
-    output_base_folder = "/Users/garyeong/project-1/dataset/자체제작_단어_keypoints" 
-
-    # 폴더 존재 확인
-    if not os.path.exists(video_folder):
-        print(f" 입력 폴더가 존재하지 않습니다: {video_folder}")
-        exit(1)
-
-    # 전체 동영상 처리
-    process_all_videos(video_folder, output_base_folder)
-
-    print(f"\n\n다음 단계:")
-    print(f"1. 생성된 JSON 파일 확인: {output_base_folder}")
-    print(f"2. model.ipynb에서 label_base_dir, keypoint_base_dir 경로 수정")
-    print(f"3. model.ipynb 실행하여 학습 데이터 생성")
-
-
-
 def extract_keypoints_from_frame(frame, pose, hands, face_mesh):
     """
     단일 프레임에서 키포인트 추출 (model.ipynb의 411차원 형식)
-
-    Returns:
-        dict: OpenPose 형식의 키포인트 데이터
-              {
-                  "people": [{
-                      "pose_keypoints_2d": [75개],    # 25 landmarks * 3 (x, y, confidence)
-                      "face_keypoints_2d": [210개],   # 70 landmarks * 3
-                      "hand_left_keypoints_2d": [63개],   # 21 landmarks * 3
-                      "hand_right_keypoints_2d": [63개]   # 21 landmarks * 3
-                  }]
-              }
     """
     # BGR → RGB 변환
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -95,7 +58,12 @@ def extract_keypoints_from_frame(frame, pose, hands, face_mesh):
 
     if hands_results.multi_hand_landmarks:
         for idx, hand_landmarks in enumerate(hands_results.multi_hand_landmarks):
-            handedness = hands_results.multi_handedness[idx].classification[0].label
+            # handedness 안전하게 가져오기
+            if hands_results.multi_handedness:
+                handedness = hands_results.multi_handedness[idx].classification[0].label
+            else:
+                handedness = "Unknown"
+            
             hand_kps = []
             for lm in hand_landmarks.landmark:
                 hand_kps.extend([lm.x, lm.y, lm.z])
@@ -117,15 +85,9 @@ def extract_keypoints_from_frame(frame, pose, hands, face_mesh):
 
     return keypoint_data
 
-
 def process_video_to_json(video_path, output_folder, label_name):
     """
     동영상을 프레임별로 처리하여 JSON 키포인트 파일들로 저장
-
-    Args:
-        video_path: 입력 동영상 경로
-        output_folder: 출력 폴더 경로
-        label_name: 라벨 이름 (예: 'ㄱ', 'ㄴ', ...)
     """
     # 출력 폴더 생성
     os.makedirs(output_folder, exist_ok=True)
@@ -142,9 +104,8 @@ def process_video_to_json(video_path, output_folder, label_name):
 
     print(f"\n📹 처리 중: {label_name}")
     print(f"   경로: {video_path}")
-    print(f"   FPS: {fps}, 총 프레임: {total_frames}")
-
-    # MediaPipe 초기화
+    
+    # MediaPipe 초기화 (with 구문 사용)
     with mp_pose.Pose(
         static_image_mode=False,
         model_complexity=1,
@@ -176,12 +137,13 @@ def process_video_to_json(video_path, output_folder, label_name):
             # 키포인트 추출
             keypoint_data = extract_keypoints_from_frame(frame, pose, hands, face_mesh)
 
-            # JSON 파일로 저장 (OpenPose 형식: {video_id}_{frame_number}_keypoints.json)
+            # JSON 파일로 저장
             json_filename = f"{label_name}_{frame_idx:06d}_keypoints.json"
             json_path = os.path.join(output_folder, json_filename)
 
+            # 들여쓰기(indent)를 None으로 하여 용량 줄임 (옵션)
             with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(keypoint_data, f, ensure_ascii=False, indent=2)
+                json.dump(keypoint_data, f, ensure_ascii=False)
 
             frame_idx += 1
             processed_frames += 1
@@ -192,22 +154,12 @@ def process_video_to_json(video_path, output_folder, label_name):
                 print(f"   진행: {frame_idx}/{total_frames} ({progress:.1f}%)", end='\r')
 
         cap.release()
-        print(f"\n 완료: {processed_frames}개 프레임 처리됨")
+        print(f"\n   완료: {processed_frames}개 프레임 처리됨")
         return True
-
 
 def create_morpheme_label_file(output_folder, label_name):
     """
     model.ipynb에서 사용하는 형식의 라벨 JSON 파일 생성
-
-    형식:
-    {
-        "data": [{
-            "attributes": [{
-                "name": "ㄱ"
-            }]
-        }]
-    }
     """
     label_data = {
         "data": [{
@@ -224,53 +176,54 @@ def create_morpheme_label_file(output_folder, label_name):
     with open(label_path, 'w', encoding='utf-8') as f:
         json.dump(label_data, f, ensure_ascii=False, indent=2)
 
-    print(f" 라벨 파일 생성: {label_filename}")
-
+    # print(f" 라벨 파일 생성: {label_filename}")
 
 def process_all_videos(video_folder, output_base_folder):
     """
-    직접영상제작 폴더의 모든 동영상을 처리
-
-    Args:
-        video_folder: 입력 동영상 폴더 (직접영상제작)
-        output_base_folder: 출력 기본 폴더
+    폴더의 모든 동영상을 처리 (파일명에 따라 라벨 그룹화)
     """
-    # 동영상 파일 찾기
-    video_files = glob.glob(os.path.join(video_folder, "*.mov"))
-    video_files.extend(glob.glob(os.path.join(video_folder, "*.mp4")))
+    # 동영상 파일 찾기 (mp4, mov 대소문자 무관)
+    video_files = []
+    for ext in ["*.mov", "*.MOV", "*.mp4", "*.MP4"]:
+        video_files.extend(glob.glob(os.path.join(video_folder, ext)))
+    
     video_files = sorted(video_files)
 
     if not video_files:
-        print(" 동영상 파일을 찾을 수 없습니다!")
+        print("❌ 동영상 파일을 찾을 수 없습니다!")
         return
 
     print(f"\n{'='*70}")
-    print(f"직접영상제작 폴더 동영상 → JSON 키포인트 변환")
+    print(f"동영상 → JSON 키포인트 변환 시작")
+    print(f"입력: {video_folder}")
+    print(f"출력: {output_base_folder}")
+    print(f"총 파일: {len(video_files)}개")
     print(f"{'='*70}")
-    print(f"입력 폴더: {video_folder}")
-    print(f"출력 폴더: {output_base_folder}")
-    print(f"총 동영상: {len(video_files)}개")
-    print(f"{'='*70}\n")
 
-    # 각 동영상 처리
     success_count = 0
     fail_count = 0
 
     for idx, video_path in enumerate(video_files, 1):
-        # 파일명에서 라벨 추출 (예: 'ㄱ.mov' → 'ㄱ')
         filename = os.path.basename(video_path)
-        label_name = os.path.splitext(filename)[0]
+        
+        # [중요] 파일명에서 라벨 추출 로직 수정
+        # 예: "안녕하세요_1.mp4" -> "안녕하세요"
+        raw_name = os.path.splitext(filename)[0]
+        if '_' in raw_name:
+            label_name = raw_name.split('_')[0]
+        else:
+            label_name = raw_name
 
         # 출력 폴더: output_base_folder/label_name/
         output_folder = os.path.join(output_base_folder, label_name)
 
-        print(f"\n[{idx}/{len(video_files)}] {label_name}")
+        print(f"\n[{idx}/{len(video_files)}] 파일: {filename} → 라벨: {label_name}")
 
         # 동영상 처리
         success = process_video_to_json(video_path, output_folder, label_name)
 
         if success:
-            # 라벨 파일 생성
+            # 라벨 파일 생성 (이미 존재해도 덮어쓰기 되므로 안전)
             create_morpheme_label_file(output_folder, label_name)
             success_count += 1
         else:
@@ -282,17 +235,26 @@ def process_all_videos(video_folder, output_base_folder):
     print(f"{'='*70}")
     print(f" 성공: {success_count}개")
     print(f" 실패: {fail_count}개")
-    print(f"\n출력 구조:")
-    print(f"  {output_base_folder}/")
-    print(f"  ├── ㄱ/")
-    print(f"  │   ├── ㄱ_000000_keypoints.json")
-    print(f"  │   ├── ㄱ_000001_keypoints.json")
-    print(f"  │   ├── ...")
-    print(f"  │   └── ㄱ_morpheme.json")
-    print(f"  ├── ㄴ/")
-    print(f"  │   └── ...")
-    print(f"  └── ...")
-    print(f"\n 이제 model.ipynb에서 이 데이터를 사용할 수 있습니다!")
+    print(f"\n출력 경로: {output_base_folder}")
+    print(f"이제 model.ipynb에서 이 데이터를 학습에 사용하세요.")
     print(f"{'='*70}")
 
+# ==========================================
+# 실행부 (Main) 
+# ==========================================
+if __name__ == "__main__":
+    # 경로 설정 (윈도우 경로 raw string 적용)
+    # 1. 입력: 촬영한 동영상이 있는 폴더
+    video_folder = r"C:/Users/yues7/OneDrive/사진/Camera Roll"
+    
+    # 2. 출력: 결과가 저장될 경로
+    output_base_folder = r"C:/j/dataset자체제작_단어_keypoints" 
 
+    # 폴더 존재 확인
+    if not os.path.exists(video_folder):
+        print(f"❌ 입력 폴더가 존재하지 않습니다: {video_folder}")
+        print("경로를 다시 확인해주세요.")
+        sys.exit(1)
+
+    # 전체 동영상 처리 시작
+    process_all_videos(video_folder, output_base_folder)
