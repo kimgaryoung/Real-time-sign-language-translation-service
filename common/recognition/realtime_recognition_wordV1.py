@@ -20,34 +20,39 @@ import warnings
 import time
 import sys
 import os
+import platform
 
 warnings.filterwarnings('ignore')
 
-# MediaPipe solutions 정의 추가
+# 프로젝트 루트 경로를 Python path에 추가
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# MediaPipe solutions 정의
 try:
     from mediapipe.python.solutions import pose as mp_pose
     from mediapipe.python.solutions import hands as mp_hands
     from mediapipe.python.solutions import face_mesh as mp_face_mesh
     from mediapipe.python.solutions import drawing_utils as mp_drawing
-    print("MediaPipe 모듈 로드 완료")
+    print("✓ MediaPipe 모듈 로드 완료")
 except ImportError:
     mp_pose = mp.solutions.pose
     mp_hands = mp.solutions.hands
     mp_face_mesh = mp.solutions.face_mesh
     mp_drawing = mp.solutions.drawing_utils
-    print("MediaPipe 레거시 방식 로드")
-
-warnings.filterwarnings('ignore')
+    print("✓ MediaPipe 레거시 방식 로드")
 
 # NLP 모듈 import
 try:
     from common.nlp import HyemiTextManager, KoreanSpellChecker
     NLP_AVAILABLE = True
-    print("NLP 모듈 로드 완료")
+    print("✓ NLP 모듈 로드 완료")
 except ImportError as e:
     NLP_AVAILABLE = False
-    print(f"NLP 모듈을 찾을 수 없습니다: {e}")
-    print("NLP 없이 기본 모드로 실행합니다.")
+    print(f"⚠️  NLP 모듈을 찾을 수 없습니다: {e}")
+    print("   NLP 없이 기본 모드로 실행합니다.")
 
 # ==================== 설정 ====================
 MODEL_PATH = "models/photo_model/photo_finger_alphabet_411_model_V2.pt"
@@ -69,7 +74,7 @@ MIN_CONFIDENCE = 80.0
 
 # 디바이스
 device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
-print(f"디바이스: {device}")
+print(f"✓ 디바이스: {device}")
 
 # ==================== 한글 조합 클래스 ====================
 class HangulComposer:
@@ -97,7 +102,7 @@ class HangulComposer:
 
     def __init__(self):
         self.reset()
-        self.word_history = []  # 단어 히스토리 추가
+        self.word_history = []
 
     def reset(self):
         """현재 조합 상태 초기화"""
@@ -253,21 +258,30 @@ class HangulComposer:
 
 # ==================== 한글 폰트 설정 ====================
 def get_korean_font(size=30):
-    """시스템에서 한글 폰트 찾기"""
+    """시스템에서 한글 폰트 찾기 (OS별 대응)"""
     font_paths = [
+        # macOS
         "/System/Library/Fonts/AppleSDGothicNeo.ttc",
         "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
         "/Library/Fonts/AppleGothic.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-        # Windows 폰트
+        # Windows
         "C:/Windows/Fonts/malgun.ttf",
         "C:/Windows/Fonts/gulim.ttc",
+        "C:/Windows/Fonts/batang.ttc",
+        # Linux
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
     ]
+    
     for path in font_paths:
-        try:
-            return ImageFont.truetype(path, size)
-        except:
-            continue
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception as e:
+                continue
+    
+    print(f"⚠️  크기 {size}의 한글 폰트를 찾을 수 없어 기본 폰트를 사용합니다.")
     return ImageFont.load_default()
 
 font_large = get_korean_font(50)
@@ -277,10 +291,14 @@ font_tiny = get_korean_font(16)
 
 def put_korean_text(img, text, pos, font, color=(255, 255, 255)):
     """OpenCV 이미지에 한글 텍스트 그리기"""
-    img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-    draw = ImageDraw.Draw(img_pil)
-    draw.text(pos, text, font=font, fill=color)
-    return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+    try:
+        img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(img_pil)
+        draw.text(pos, text, font=font, fill=color)
+        return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+    except Exception as e:
+        print(f"텍스트 렌더링 오류: {e}")
+        return img
 
 
 # ==================== 모델 정의 ====================
@@ -312,32 +330,40 @@ class KeypointClassifier(nn.Module):
 
 
 # ==================== 모델 로드 ====================
-print("모델 로드 중...")
-checkpoint = torch.load(MODEL_PATH, map_location=device, weights_only=False)
+def load_model():
+    """모델 로드 및 초기화"""
+    try:
+        print("모델 로드 중...")
+        checkpoint = torch.load(MODEL_PATH, map_location=device, weights_only=False)
 
-num_classes = checkpoint['num_classes']
-idx_to_label = checkpoint['idx_to_label']
-norm_mean = checkpoint['norm_params']['mean'].to(device)
-norm_std = checkpoint['norm_params']['std'].to(device)
+        num_classes = checkpoint['num_classes']
+        idx_to_label = checkpoint['idx_to_label']
+        norm_mean = checkpoint['norm_params']['mean'].to(device)
+        norm_std = checkpoint['norm_params']['std'].to(device)
 
-model = KeypointClassifier(input_size=TOTAL_DIM, num_classes=num_classes, dropout=0.0)
-model.load_state_dict(checkpoint['model_kp_state'])
-model = model.to(device)
-model.eval()
+        model = KeypointClassifier(input_size=TOTAL_DIM, num_classes=num_classes, dropout=0.0)
+        model.load_state_dict(checkpoint['model_kp_state'])
+        model = model.to(device)
+        model.eval()
 
-print(f"클래스 수: {num_classes}")
-print(f"라벨: {list(idx_to_label.values())}")
-
-
-# ==================== MediaPipe 초기화 ====================
-mp_pose = mp.solutions.pose
-mp_hands = mp.solutions.hands
-mp_face_mesh = mp.solutions.face_mesh
-mp_drawing = mp.solutions.drawing_utils
+        print(f"✓ 클래스 수: {num_classes}")
+        print(f"✓ 라벨: {list(idx_to_label.values())}")
+        
+        return model, idx_to_label, norm_mean, norm_std
+    except FileNotFoundError:
+        print(f"❌ 모델 파일을 찾을 수 없습니다: {MODEL_PATH}")
+        print("   models/photo_model/ 폴더에 모델 파일이 있는지 확인하세요.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ 모델 로드 중 오류: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 # ==================== 키포인트 추출 함수 ====================
 def extract_keypoints(image, pose, hands, face_mesh):
+    """이미지에서 Pose, Hands, Face Mesh 키포인트 추출"""
     rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
     pose_results = pose.process(rgb_image)
@@ -402,6 +428,7 @@ def extract_keypoints(image, pose, hands, face_mesh):
 
 
 def apply_weights(keypoints):
+    """키포인트에 가중치 적용"""
     weighted = keypoints.copy()
     weighted[0:POSE_DIM] *= POSE_WEIGHT
     weighted[POSE_DIM:POSE_DIM+FACE_DIM] *= FACE_WEIGHT
@@ -411,7 +438,8 @@ def apply_weights(keypoints):
 
 
 # ==================== 예측 함수 ====================
-def predict_top3(keypoints):
+def predict_top3(keypoints, model, idx_to_label, norm_mean, norm_std):
+    """상위 3개 예측 결과 반환"""
     weighted = apply_weights(keypoints)
     x = torch.tensor(weighted, dtype=torch.float32).unsqueeze(0).to(device)
     x = (x - norm_mean) / norm_std
@@ -446,8 +474,6 @@ class JamoTracker:
         """
         자모음 업데이트 및 확정 여부 반환
         Returns: (confirmed_jamo, progress)
-        - confirmed_jamo: 확정된 자모음 (None이면 미확정)
-        - progress: 확정 진행률 (0.0 ~ 1.0)
         """
         current_time = time.time()
 
@@ -488,14 +514,6 @@ class JamoTracker:
 def process_with_nlp(words_list, text_manager, spell_checker):
     """
     단어 리스트를 자연스러운 문장으로 변환
-    
-    Args:
-        words_list: 인식된 단어 리스트
-        text_manager: HyemiTextManager 인스턴스
-        spell_checker: KoreanSpellChecker 인스턴스
-    
-    Returns:
-        변환된 문장
     """
     if not words_list:
         return ""
@@ -514,66 +532,99 @@ def process_with_nlp(words_list, text_manager, spell_checker):
 
 
 # ==================== USB 카메라 안정화 함수 ====================
-
 def find_and_init_camera(preferred_width=640, preferred_height=480):
     """
-    사용 가능한 USB 카메라를 찾아 초기화
-    
-    Returns:
-        cap: OpenCV VideoCapture 객체
-        camera_idx: 카메라 인덱스
+    OS별로 최적화된 카메라 초기화
     """
     print("="*60)
     print("카메라 검색 중...")
+    system = platform.system()
+    print(f"운영체제: {system}")
     print("="*60)
     
-    # 1. 사용 가능한 모든 카메라 찾기
+    # OS별 백엔드 선택
+    if system == 'Windows':
+        backend = cv2.CAP_DSHOW
+        print("백엔드: DirectShow (Windows)")
+    elif system == 'Darwin':  # macOS
+        backend = cv2.CAP_AVFOUNDATION
+        print("백엔드: AVFoundation (macOS)")
+    else:  # Linux
+        backend = cv2.CAP_V4L2
+        print("백엔드: V4L2 (Linux)")
+    
     available_cameras = []
-    for i in range(10):  # 0~9번까지 확인
-        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)  # Windows DirectShow
-        if cap.isOpened():
-            ret, frame = cap.read()
-            if ret and frame is not None:
-                h, w = frame.shape[:2]
-                available_cameras.append({
-                    'idx': i,
-                    'width': w,
-                    'height': h,
-                    'cap': cap
-                })
-                print(f"  카메라 {i} 발견: {w}x{h}")
+    
+    # 카메라 검색 (0~4번까지)
+    for i in range(5):
+        try:
+            cap = cv2.VideoCapture(i, backend)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    h, w = frame.shape[:2]
+                    available_cameras.append({
+                        'idx': i,
+                        'width': w,
+                        'height': h,
+                        'cap': cap
+                    })
+                    print(f"  ✓ 카메라 {i}: {w}x{h}")
+                else:
+                    cap.release()
             else:
+                # 백엔드 실패 시 ANY로 재시도
                 cap.release()
-        else:
-            cap.release()
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret and frame is not None:
+                        h, w = frame.shape[:2]
+                        available_cameras.append({
+                            'idx': i,
+                            'width': w,
+                            'height': h,
+                            'cap': cap
+                        })
+                        print(f"  ✓ 카메라 {i}: {w}x{h} (fallback)")
+                    else:
+                        cap.release()
+                else:
+                    cap.release()
+        except Exception as e:
+            print(f"  ✗ 카메라 {i} 오류: {e}")
+            continue
     
     if not available_cameras:
-        print("\n사용 가능한 카메라를 찾을 수 없습니다.")
-        print("확인 사항:")
-        print("  1. USB 카메라가 제대로 연결되어 있는지")
-        print("  2. 다른 프로그램에서 카메라를 사용 중이지 않은지")
-        print("  3. Windows 카메라 설정에서 앱 권한이 허용되어 있는지")
+        print("\n❌ 사용 가능한 카메라를 찾을 수 없습니다.")
+        print("\n확인 사항:")
+        print("  1. 카메라가 제대로 연결되어 있는지")
+        print("  2. 다른 프로그램에서 사용 중이지 않은지")
+        if system == 'Windows':
+            print("  3. Windows 카메라 설정에서 앱 권한 확인")
+        elif system == 'Darwin':
+            print("  3. 시스템 환경설정 > 보안 및 개인정보보호 > 카메라 권한 확인")
         return None, -1
     
-    # 2. 첫 번째로 발견된 카메라 사용
+    # 첫 번째 카메라 사용
     camera_info = available_cameras[0]
     cap = camera_info['cap']
     camera_idx = camera_info['idx']
     
-    # 나머지 카메라들은 닫기
+    # 나머지 카메라 닫기
     for cam in available_cameras[1:]:
         cam['cap'].release()
     
-    print(f"\n카메라 {camera_idx} 선택됨")
+    print(f"\n✓ 카메라 {camera_idx} 선택")
     
-    # 3. 카메라 설정 최적화
-    print(f"카메라 설정 중...")
-    
-    # 해상도 설정 시도
+    # 해상도 설정
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, preferred_width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, preferred_height)
     
-    # 실제 적용된 해상도 확인
+    # 버퍼 최소화
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    
+    # 실제 설정값 확인
     actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = int(cap.get(cv2.CAP_PROP_FPS))
@@ -581,70 +632,49 @@ def find_and_init_camera(preferred_width=640, preferred_height=480):
     print(f"  해상도: {actual_width}x{actual_height}")
     print(f"  FPS: {fps}")
     
-    # 4. 버퍼 설정
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 버퍼 최소화로 지연 감소
+    # 밝기 설정 (Windows/Linux만, macOS는 지원 제한적)
+    if system != 'Darwin':
+        try:
+            cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+            cap.set(cv2.CAP_PROP_EXPOSURE, -4)
+            cap.set(cv2.CAP_PROP_BRIGHTNESS, 200)
+            cap.set(cv2.CAP_PROP_CONTRAST, 80)
+            cap.set(cv2.CAP_PROP_GAIN, 100)
+            print("  ✓ 밝기 설정 완료")
+        except:
+            print("  ⚠️  밝기 설정 스킵 (지원 안 됨)")
     
-    # 5. 밝기 및 노출 설정 (어두운 화면 개선)
-    print("카메라 밝기 설정 중...")
-    
-    # 자동 노출 비활성화 후 수동 설정
-    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)  # 1 = 수동 모드
-    
-    # 노출 값 직접 설정 (값이 클수록 밝음)
-    cap.set(cv2.CAP_PROP_EXPOSURE, -4)  # -1 ~ -13 범위, -4 정도가 적당히 밝음
-    
-    # 밝기 최대로 설정
-    cap.set(cv2.CAP_PROP_BRIGHTNESS, 200)  # 밝기 최대한 증가
-    
-    # 대비 높게 설정
-    cap.set(cv2.CAP_PROP_CONTRAST, 80)  # 대비 증가
-    
-    # 채도 설정
-    cap.set(cv2.CAP_PROP_SATURATION, 80)  # 채도 증가
-    
-    # 게인 설정 (감도) - 최대로
-    cap.set(cv2.CAP_PROP_GAIN, 100)  # 게인 최대
-    
-    # 화이트 밸런스 자동
-    cap.set(cv2.CAP_PROP_AUTO_WB, 1)
-    
-    # 실제 적용된 값 확인
-    actual_brightness = cap.get(cv2.CAP_PROP_BRIGHTNESS)
-    actual_exposure = cap.get(cv2.CAP_PROP_EXPOSURE)
-    actual_gain = cap.get(cv2.CAP_PROP_GAIN)
-    print(f"  밝기: {actual_brightness}")
-    print(f"  노출: {actual_exposure}")
-    print(f"  게인: {actual_gain}")
-    
-    # 6. 초기 프레임 워밍업 (더 많이)
-    print("카메라 워밍업 중...")
-    for i in range(30):  # 30프레임 워밍업
-        ret, frame = cap.read()
-        if ret and frame is not None:
-            if i == 29:
-                print(f"워밍업 완료 (프레임 크기: {frame.shape})")
+        # 워밍업
+    print("워밍업 중...", end="", flush=True)
+    for _ in range(30):
+        cap.read()
         time.sleep(0.03)
-    print("="*60)
-    print()
+    print(" 완료!")
     
+    print("="*60)
     return cap, camera_idx
 
 
-# ==================== 메인 루프 ====================
-print("\n" + "="*60)
-print("실시간 지문자 인식 + 단어 조합 + NLP 자연어 처리")
-print("="*60)
-print("조작키:")
-print("  q: 종료")
-print("  백스페이스: 마지막 글자 삭제")
-print("  c: 전체 초기화")
-print("  s: 현재 단어를 NLP로 문장 변환")
-print("  스페이스: 단어 띄어쓰기")
-if NLP_AVAILABLE:
-    print("\n NLP 모드: 활성화")
-else:
-    print("\n NLP 모드: 비활성화 (기본 모드)")
-print("="*60 + "\n")
+# ==================== 메인 함수 ====================
+def main():
+    """메인 실행 함수"""
+    print("\n" + "="*60)
+    print("실시간 지문자 인식 + 단어 조합 + NLP 자연어 처리")  # 수정
+    print("="*60)
+    print("조작키:")
+    print("  q: 종료")
+    print("  백스페이스: 마지막 글자 삭제")
+    print("  c: 전체 초기화")
+    print("  s: 현재 단어를 NLP로 문장 변환")
+    print("  스페이스: 단어 띄어쓰기")
+    if NLP_AVAILABLE:
+        print("\n✓ NLP 모드: 활성화")
+    else:
+        print("\n⚠️  NLP 모드: 비활성화 (기본 모드)")
+    print("="*60 + "\n")
+
+# 모델 로드
+model, idx_to_label, norm_mean, norm_std = load_model()
 
 # 한글 조합기 및 트래커 초기화
 composer = HangulComposer()
@@ -652,261 +682,280 @@ tracker = JamoTracker(confirm_time=CONFIRM_TIME, min_confidence=MIN_CONFIDENCE)
 
 # NLP 모듈 초기화
 if NLP_AVAILABLE:
-    text_manager = HyemiTextManager()
-    spell_checker = KoreanSpellChecker()
-    nlp_sentence = ""  # NLP 변환 결과 저장
+    try:
+        text_manager = HyemiTextManager()
+        spell_checker = KoreanSpellChecker()
+        nlp_sentence = ""
+        print("✓ NLP 모듈 초기화 완료")
+    except Exception as e:
+        print(f"⚠️  NLP 모듈 초기화 실패: {e}")
+        text_manager = None
+        spell_checker = None
+        nlp_sentence = ""
 else:
     text_manager = None
     spell_checker = None
     nlp_sentence = ""
 
-print("MediaPipe 초기화 중...")
+print("\nMediaPipe 초기화 중...")
 
-with mp_pose.Pose(static_image_mode=False, model_complexity=1, min_detection_confidence=0.5) as pose, \
-     mp_hands.Hands(static_image_mode=False, max_num_hands=2, model_complexity=1, min_detection_confidence=0.5) as hands, \
-     mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, min_detection_confidence=0.5) as face_mesh:
+try:
+    with mp_pose.Pose(static_image_mode=False, model_complexity=1, min_detection_confidence=0.5) as pose, \
+         mp_hands.Hands(static_image_mode=False, max_num_hands=2, model_complexity=1, min_detection_confidence=0.5) as hands, \
+         mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, min_detection_confidence=0.5) as face_mesh:
 
-    cap, camera_idx = find_and_init_camera(preferred_width=640, preferred_height=480)
-    
-    if cap is None:
-        print("프로그램을 종료합니다.")
-        exit()
-
-    print("카메라 연결 성공! 창이 열립니다...")
-    
-    # 연속 실패 카운터 추가
-    consecutive_failures = 0
-    MAX_FAILURES = 50  # 50번 연속 실패 시 종료
-    
-    # 메인 루프
-    while cap.isOpened():
-        ret, frame = cap.read()
+        # 카메라 초기화
+        cap, camera_idx = find_and_init_camera(preferred_width=640, preferred_height=480)
         
-        if not ret or frame is None:
-            consecutive_failures += 1
-            print(f"프레임 읽기 실패 ({consecutive_failures}/{MAX_FAILURES})")
-            
-            if consecutive_failures >= MAX_FAILURES:
-                print("\n카메라 연결이 끊어졌습니다.")
-                break
-            
-            time.sleep(0.1)
-            continue
+        if cap is None:
+            print("프로그램을 종료합니다.")
+            sys.exit()
+        print("\n✓ 카메라 연결 성공! 창이 열립니다...\n")
         
-        # 프레임 읽기 성공 시 카운터 리셋
+        # 연속 실패 카운터
         consecutive_failures = 0
+        MAX_FAILURES = 50
         
-        # ========== 좌우 반전 (거울 모드) ==========
-        frame = cv2.flip(frame, 1)
-        
-        # ========== 키포인트 추출 및 예측 ==========
-        keypoints, detection_info, hands_results = extract_keypoints(frame, pose, hands, face_mesh)
+        # 메인 루프
+        while cap.isOpened():
+            ret, frame = cap.read()
+            
+            if not ret or frame is None:
+                consecutive_failures += 1
+                print(f"프레임 읽기 실패 ({consecutive_failures}/{MAX_FAILURES})")
+                
+                if consecutive_failures >= MAX_FAILURES:
+                    print("\n카메라 연결이 끊어졌습니다.")
+                    break
+                
+                time.sleep(0.1)
+                continue
+            
+            # 프레임 읽기 성공 시 카운터 리셋
+            consecutive_failures = 0
+            
+            # 좌우 반전 (거울 모드)
+            frame = cv2.flip(frame, 1)
+            
+            # 키포인트 추출 및 예측
+            keypoints, detection_info, hands_results = extract_keypoints(frame, pose, hands, face_mesh)
 
-        # 손 랜드마크 그리기 (카메라 영상 위에 표시)
-        if hands_results.multi_hand_landmarks:
-            for hand_landmarks in hands_results.multi_hand_landmarks:
-                mp_drawing.draw_landmarks(
-                    frame, hand_landmarks, mp_hands.HAND_CONNECTIONS,
-                    mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=4),
-                    mp_drawing.DrawingSpec(color=(255, 255, 255), thickness=2)
-                )
+            # 손 랜드마크 그리기
+            if hands_results.multi_hand_landmarks:
+                for hand_landmarks in hands_results.multi_hand_landmarks:
+                    mp_drawing.draw_landmarks(
+                        frame, hand_landmarks, mp_hands.HAND_CONNECTIONS,
+                        mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=4),
+                        mp_drawing.DrawingSpec(color=(255, 255, 255), thickness=2)
+                    )
 
-        hand_detected = detection_info['left_hand'] or detection_info['right_hand']
+            hand_detected = detection_info['left_hand'] or detection_info['right_hand']
 
-        # ========== UI 박스 그리기 (더 작게, 투명도 추가) ==========
-        
-        # 반투명 오버레이 생성
-        overlay = frame.copy()
-        
-        # 1. 예측 결과 박스 (왼쪽 상단 - 더 작게)
-        box1_x1, box1_y1 = 10, 10
-        box1_x2, box1_y2 = 300, 160
-        cv2.rectangle(overlay, (box1_x1, box1_y1), (box1_x2, box1_y2), (0, 0, 0), -1)
-        cv2.rectangle(frame, (box1_x1, box1_y1), (box1_x2, box1_y2), (255, 255, 255), 2)
+# UI 박스 그리기 (반투명)
+            overlay = frame.copy()
+            
+            # 1. 예측 결과 박스 (왼쪽 상단)
+            box1_x1, box1_y1 = 10, 10
+            box1_x2, box1_y2 = 280, 140
+            cv2.rectangle(overlay, (box1_x1, box1_y1), (box1_x2, box1_y2), (0, 0, 0), -1)
+            cv2.rectangle(frame, (box1_x1, box1_y1), (box1_x2, box1_y2), (255, 255, 255), 2)
 
-        # 2. 조합된 단어 박스 (오른쪽 상단 - 더 작게)
-        box2_x1 = frame.shape[1] - 310
-        box2_y1 = 10
-        box2_x2 = frame.shape[1] - 10
-        box2_y2 = 140
-        cv2.rectangle(overlay, (box2_x1, box2_y1), (box2_x2, box2_y2), (0, 0, 0), -1)
-        cv2.rectangle(frame, (box2_x1, box2_y1), (box2_x2, box2_y2), (0, 255, 255), 2)
+            # 2. 조합된 단어 박스 (오른쪽 상단)
+            box2_x1 = frame.shape[1] - 350
+            box2_y1 = 10
+            box2_x2 = frame.shape[1] - 10
+            box2_y2 = 140
+            cv2.rectangle(overlay, (box2_x1, box2_y1), (box2_x2, box2_y2), (0, 0, 0), -1)
+            cv2.rectangle(frame, (box2_x1, box2_y1), (box2_x2, box2_y2), (0, 255, 255), 2)
 
-        # 3. NLP 변환 결과 박스 (하단 중앙 - 필요할 때만)
-        if NLP_AVAILABLE and nlp_sentence:
-            box3_height = 80
-            box3_y1 = frame.shape[0] - box3_height - 10
-            box3_y2 = frame.shape[0] - 10
-            box3_x1 = 200
-            box3_x2 = frame.shape[1] - 200
-            cv2.rectangle(overlay, (box3_x1, box3_y1), (box3_x2, box3_y2), (0, 0, 0), -1)
-            cv2.rectangle(frame, (box3_x1, box3_y1), (box3_x2, box3_y2), (0, 255, 0), 3)
+            # 3. NLP 변환 결과 박스 (하단 중앙)
+            if NLP_AVAILABLE and nlp_sentence:
+                box3_height = 80
+                box3_y1 = frame.shape[0] - box3_height - 10
+                box3_y2 = frame.shape[0] - 10
+                box3_x1 = 200
+                box3_x2 = frame.shape[1] - 200
+                cv2.rectangle(overlay, (box3_x1, box3_y1), (box3_x2, box3_y2), (0, 0, 0), -1)
+                cv2.rectangle(frame, (box3_x1, box3_y1), (box3_x2, box3_y2), (0, 255, 0), 3)
 
-        # 오버레이 적용 (투명도 70%)
-        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+            # 오버레이 적용 (투명도 70%)
+            cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
 
-        confirmed_jamo = None
-        progress = 0.0
+            confirmed_jamo = None
+            progress = 0.0
 
-        # ========== 예측 및 조합 처리 ==========
-        
-        if hand_detected:
-            top3 = predict_top3(keypoints)
-            top1_label, top1_conf = top3[0]
+            # 예측 및 조합 처리
+            if hand_detected:
+                top3 = predict_top3(keypoints, model, idx_to_label, norm_mean, norm_std)
+                top1_label, top1_conf = top3[0]
 
-            # 자모음 트래커 업데이트
-            confirmed_jamo, progress = tracker.update(top1_label, top1_conf)
+                # 자모음 트래커 업데이트
+                confirmed_jamo, progress = tracker.update(top1_label, top1_conf)
 
-            # 확정된 자모음이 있으면 조합기에 추가
-            if confirmed_jamo:
-                composer.add_jamo(confirmed_jamo)
+                # 확정된 자모음이 있으면 조합기에 추가
+                if confirmed_jamo:
+                    composer.add_jamo(confirmed_jamo)
 
-            # 예측 결과 표시 (더 작은 폰트)
-            frame = put_korean_text(frame, "TOP 3 예측", (20, 20), font_small, (0, 255, 255))
+                # 예측 결과 표시 - 간격 조정
+                frame = put_korean_text(frame, "TOP 3 예측", (20, 20), font_small, (0, 255, 255))
 
-            colors = [(0, 255, 0), (255, 200, 0), (255, 150, 0)]
-            for i, (label, prob) in enumerate(top3):
-                rank = i + 1
-                text = f"{rank}. {label} {prob:.1f}%"
-                y_pos = 50 + i * 30
-                frame = put_korean_text(frame, text, (20, y_pos), font_small, colors[i])
+                for i, (label, prob) in enumerate(top3):
+                    rank = i + 1
+                    text = f"{rank}. {label} {prob:.1f}%"
+                    y_pos = 50 + i * 35  # 30 → 35로 간격 넓히기
+                    frame = put_korean_text(frame, text, (20, y_pos), font_small, colors[i])
 
-            # 진행률 바 그리기 (더 작게)
-            bar_x, bar_y = 20, 140
-            bar_width, bar_height = 260, 8
-            cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (80, 80, 80), -1)
-            if progress > 0:
-                cv2.rectangle(frame, (bar_x, bar_y), 
-                            (bar_x + int(bar_width * progress), bar_y + bar_height), 
-                            (0, 255, 0), -1)
-        else:
-            frame = put_korean_text(frame, "손을 보여주세요", (20, 20), font_small, (255, 100, 100))
-            frame = put_korean_text(frame, "카메라 앞에 손을", (20, 50), font_tiny, (200, 200, 200))
-            frame = put_korean_text(frame, "펼쳐주세요", (20, 75), font_tiny, (200, 200, 200))
-            tracker.reset()
-
-        # ========== 조합된 단어 표시 ==========
-        
-        current_text = composer.get_current_text()
-        composing_jamo = composer.get_composing_jamo()
-
-        frame = put_korean_text(frame, "조합 단어", (box2_x1 + 10, 20), font_small, (0, 255, 255))
-
-        # 현재 조합된 텍스트
-        display_text = current_text if current_text else "(대기)"
-        text_color = (255, 255, 255) if current_text else (150, 150, 150)
-        frame = put_korean_text(frame, display_text, (box2_x1 + 10, 55), font_medium, text_color)
-
-        # 조합 중인 자모음 표시
-        if composing_jamo:
-            frame = put_korean_text(frame, f"→ {composing_jamo}", (box2_x1 + 10, 95), font_tiny, (255, 255, 0))
-
-        # 단어 개수 표시
-        if current_text and NLP_AVAILABLE:
-            words = composer.get_words_list()
-            word_count_text = f"{len(words)}개"
-            frame = put_korean_text(frame, word_count_text, (box2_x1 + 10, 115), font_tiny, (150, 200, 255))
-
-        # ========== NLP 변환 결과 표시 ==========
-        
-        if NLP_AVAILABLE and nlp_sentence:
-            box_y = frame.shape[0] - 90
-            frame = put_korean_text(frame, "NLP 변환", (220, box_y + 5), font_small, (0, 255, 0))
-            frame = put_korean_text(frame, nlp_sentence, (220, box_y + 35), font_medium, (255, 255, 255))
-
-        # ========== 상태 표시 (하단) ==========
-        
-        # 손 감지 상태 (왼쪽 하단)
-        status_color = (0, 255, 0) if hand_detected else (100, 100, 100)
-        status_text = "●" if hand_detected else "○"
-        cv2.circle(frame, (20, frame.shape[0] - 20), 8, status_color, -1)
-        frame = put_korean_text(frame, f"손 감지 {status_text}", (40, frame.shape[0] - 30), 
-                            font_tiny, status_color)
-
-        # 도움말 (오른쪽 하단)
-        help_y = frame.shape[0] - 30
-        frame = put_korean_text(frame, "q:종료 | BS:삭제 | c:초기화 | s:문장 | 스페이스:띄어쓰기", 
-                            (frame.shape[1] - 550, help_y), font_tiny, (150, 150, 150))
-
-        # 화면 표시
-        cv2.imshow('Sign Language Recognition + NLP (Press Q to quit)', frame)
-
-        # ========== 키 입력 처리 ==========
-        
-        key = cv2.waitKey(1) & 0xFF
-        
-        if key == ord('q'):
-            break
-        elif key == 8 or key == 127:  # 백스페이스
-            composer.delete_last()
-            tracker.reset()
-            print(f"삭제 → {composer.get_current_text()}")
-        elif key == ord('c'):  # 초기화
-            composer.clear_all()
-            tracker.reset()
-            nlp_sentence = ""
-            print("전체 초기화")
-        elif key == ord('s'):  # NLP 변환
-            if NLP_AVAILABLE:
-                words = composer.get_words_list()
-                if words:
-                    nlp_sentence = process_with_nlp(words, text_manager, spell_checker)
-                    print(f"\n{'='*60}")
-                    print(f"단어: {words}")
-                    print(f"변환: {nlp_sentence}")
-                    print(f"{'='*60}\n")
-                else:
-                    print("변환할 단어가 없습니다.")
+                # 진행률 바 그리기
+                bar_x, bar_y = 20, 140
+                bar_width, bar_height = 260, 8
+                cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (80, 80, 80), -1)
+                if progress > 0:
+                    cv2.rectangle(frame, (bar_x, bar_y), 
+                                (bar_x + int(bar_width * progress), bar_y + bar_height), 
+                                (0, 255, 0), -1)
             else:
-                print("NLP 모듈이 비활성화되어 있습니다.")
-        elif key == 32:  # 스페이스
-            current = composer.get_current_text()
-            if current and not current.endswith(' '):
-                composer.completed_text += ' '
-                print(f"띄어쓰기 → {composer.get_current_text()}")
+                frame = put_korean_text(frame, "손을 보여주세요", (20, 20), font_small, (255, 100, 100))
+                frame = put_korean_text(frame, "카메라 앞에 손을", (20, 50), font_tiny, (200, 200, 200))
+                frame = put_korean_text(frame, "펼쳐주세요", (20, 75), font_tiny, (200, 200, 200))
+                tracker.reset()
 
-    cap.release()
+            # 조합된 단어 표시
+            current_text = composer.get_current_text()
+            composing_jamo = composer.get_composing_jamo()
+
+            frame = put_korean_text(frame, "조합 단어", (box2_x1 + 10, 20), font_small, (0, 255, 255))
+
+            # 현재 조합된 텍스트
+            display_text = current_text if current_text else "(대기)"
+            text_color = (255, 255, 255) if current_text else (150, 150, 150)
+            frame = put_korean_text(frame, display_text, (box2_x1 + 10, 55), font_medium, text_color)
+
+            # 조합 중인 자모음 표시
+            if composing_jamo:
+                frame = put_korean_text(frame, f"→ {composing_jamo}", (box2_x1 + 10, 95), font_tiny, (255, 255, 0))
+
+            # 단어 개수 표시
+            if current_text and NLP_AVAILABLE:
+                words = composer.get_words_list()
+                word_count_text = f"{len(words)}개"
+                frame = put_korean_text(frame, word_count_text, (box2_x1 + 10, 115), font_tiny, (150, 200, 255))
+
+            # NLP 변환 결과 표시
+            if NLP_AVAILABLE and nlp_sentence:
+                box_y = frame.shape[0] - 90
+                frame = put_korean_text(frame, "NLP 변환", (220, box_y + 5), font_small, (0, 255, 0))
+                frame = put_korean_text(frame, nlp_sentence, (220, box_y + 35), font_medium, (255, 255, 255))
+
+            # 상태 표시 (하단)
+            status_color = (0, 255, 0) if hand_detected else (100, 100, 100)
+            status_text = "●" if hand_detected else "○"
+            cv2.circle(frame, (20, frame.shape[0] - 20), 8, status_color, -1)
+            frame = put_korean_text(frame, f"손 감지 {status_text}", (40, frame.shape[0] - 30), 
+                                font_tiny, status_color)
+
+            # 도움말 (오른쪽 하단)
+            help_y = frame.shape[0] - 30
+            frame = put_korean_text(frame, "q:종료 | BS:삭제 | c:초기화 | s:문장 | 스페이스:띄어쓰기", 
+                                (frame.shape[1] - 550, help_y), font_tiny, (150, 150, 150))
+
+            # 화면 표시
+            cv2.imshow('Sign Language Recognition + NLP (Press Q to quit)', frame)
+
+            # 키 입력 처리
+            key = cv2.waitKey(1) & 0xFF
+            
+            if key == ord('q'):
+                print("\n사용자 종료 요청")
+                break
+            elif key == 8 or key == 127:  # 백스페이스
+                composer.delete_last()
+                tracker.reset()
+                print(f"삭제 → {composer.get_current_text()}")
+            elif key == ord('c'):  # 초기화
+                composer.clear_all()
+                tracker.reset()
+                nlp_sentence = ""
+                print("전체 초기화")
+            elif key == ord('s'):  # NLP 변환
+                if NLP_AVAILABLE and text_manager and spell_checker:
+                    words = composer.get_words_list()
+                    if words:
+                        nlp_sentence = process_with_nlp(words, text_manager, spell_checker)
+                        print(f"\n{'='*60}")
+                        print(f"단어: {words}")
+                        print(f"변환: {nlp_sentence}")
+                        print(f"{'='*60}\n")
+                    else:
+                        print("변환할 단어가 없습니다.")
+                else:
+                    print("NLP 모듈이 비활성화되어 있습니다.")
+            elif key == 32:  # 스페이스
+                current = composer.get_current_text()
+                if current and not current.endswith(' '):
+                    composer.completed_text += ' '
+                    print(f"띄어쓰기 → {composer.get_current_text()}")
+
+        # 카메라 해제
+        cap.release()
+        cv2.destroyAllWindows()
+
+except KeyboardInterrupt:
+    print("\n\n사용자에 의해 중단되었습니다.")
+except Exception as e:
+    print(f"\n\n오류 발생: {e}")
+    import traceback
+    traceback.print_exc()
+finally:
+    # 리소스 정리
+    if 'cap' in locals() and cap is not None:
+        cap.release()
     cv2.destroyAllWindows()
+    
+    # 종료 시 최종 결과 출력
+    print("\n" + "="*60)
+    print("종료 - 최종 결과")
+    print("="*60)
+    if 'composer' in locals():
+        print(f"조합된 텍스트: {composer.get_current_text()}")
 
-cv2.destroyAllWindows()
+        if NLP_AVAILABLE and 'nlp_sentence' in locals() and nlp_sentence:
+            print(f"NLP 변환 결과: {nlp_sentence}")
+        elif NLP_AVAILABLE and 'text_manager' in locals() and text_manager:
+            final_words = composer.get_words_list()
+            if final_words:
+                try:
+                    final_sentence = process_with_nlp(final_words, text_manager, spell_checker)
+                    print(f"최종 NLP 변환: {final_sentence}")
+                except:
+                    pass
 
-# 종료 시 최종 결과 출력
-print("\n" + "="*60)
-print("종료 - 최종 결과")
-print("="*60)
-print(f"조합된 텍스트: {composer.get_current_text()}")
+    print("="*60)
+    print("프로그램을 종료합니다.")
+    print("="*60 + "\n")
 
-if NLP_AVAILABLE and nlp_sentence:
-    print(f"NLP 변환 결과: {nlp_sentence}")
-elif NLP_AVAILABLE:
-    final_words = composer.get_words_list()
-    if final_words:
-        final_sentence = process_with_nlp(final_words, text_manager, spell_checker)
-        print(f"최종 NLP 변환: {final_sentence}")
 
-print("="*60)
-print("프로그램을 종료합니다.")
-print("="*60 + "\n")
-
+    # 수정: 함수 밖으로 이동
+if __name__ == "__main__":
+    main()
 
 '''
-## 전체 데이터 흐름
+전체 데이터 흐름
 
-1. 카메라 입력
-   ↓
-2. MediaPipe 키포인트 추출 (411차원)
-   ↓
-3. AI 모델 예측 → Top 3 (ㄱ 95%, ㄴ 3%, ㄷ 2%)
-   ↓
-4. Tracker: 1초 유지 확인 → 확정!
-   ↓
-5. Composer: 자모음 조합 → '가', '각', '갑'...
-   ↓
-6. 사용자가 's' 키 누름
-   ↓
-7. TextManager: ['나', '밥', '먹다'] → '저는 밥을 먹습니다'
-   ↓
-8. SpellChecker: 맞춤법 교정
-   ↓
-9. 화면에 최종 문장 표시
+카메라 입력
+↓
+MediaPipe 키포인트 추출 (411차원)
+↓
+AI 모델 예측 → Top 3 (ㄱ 95%, ㄴ 3%, ㄷ 2%)
+↓
+Tracker: 1초 유지 확인 → 확정!
+↓
+Composer: 자모음 조합 → '가', '각', '갑'...
+↓
+사용자가 's' 키 누름
+↓
+TextManager: ['나', '밥', '먹다'] → '저는 밥을 먹습니다'
+↓
+SpellChecker: 맞춤법 교정
+↓
+화면에 최종 문장 표시
 '''
