@@ -439,21 +439,9 @@ def process_all_videos(video_folder, output_base_folder, skip_mode="all"):
 
 
 if __name__ == "__main__":
-    # ============================================================
-    # 경로 설정 (운영체제에 맞게 수정하세요)
-    # ============================================================
-    if platform.system() == 'Windows':
-        # Windows 경로 예시 (본인 환경에 맞게 수정)
-        video_folder = r"C:\Users\사용자\Desktop\Real-time-sign-language-translation-service\data\set\가령_영상데이터"
-        output_base_folder = r"C:\Users\사용자\Desktop\Real-time-sign-language-translation-service\data\set\가령_영상데이터"
-    else:
-        # macOS / Linux 경로
-        video_folder = "/Users/garyeong/Desktop/Real-time-sign-language-translation-service/data/set/가령_영상데이터"
-        output_base_folder = "/Users/garyeong/Desktop/Real-time-sign-language-translation-service/data/set/가령_영상데이터"
-
-    # Path 객체로 변환 (경로 호환성 향상)
-    video_folder = Path(video_folder)
-    output_base_folder = Path(output_base_folder)
+    # 경로 설정
+    video_folder = r"C:\Users\user\Real-time-sign-language-translation-service\data\set\hyemi_video"
+    output_base_folder = r"C:\Users\user\Real-time-sign-language-translation-service\data\set\hyemi_keypoints"
 
     # ============================================================
     # 빈 프레임 필터 모드 설정 
