@@ -22,8 +22,8 @@ mp_face_mesh = mp.solutions.face_mesh
 
 
 if __name__ == "__main__":
-    image_folder = "/Users/garyeong/project-1/직접사진제작_지문자" #데이터 경로 여기로 
-    output_base_folder = "/Users/garyeong/project-1/dataset/자체제작_사진_지문자_keypoints" #출력 경로 여기로 
+    image_folder = r"C:\Users\user\final_project\직접사진제작_지문자" #데이터 경로 여기로 
+    output_base_folder = r"C:\Users\user\final_project\dataset\자체제작_사진_지문자_keypoints" #출력 경로 여기로 
 
     if not os.path.exists(image_folder):
         print(f"[ERROR] Input folder does not exist: {image_folder}")

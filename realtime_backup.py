@@ -1,7 +1,4 @@
-r"""
-PS C:\Users\user\Real-time-sign-language-translation-service 이 경로에서 
-python common/recognition/realtime_recognition_wordV1.py  입력해서 실행함
-
+"""
 실시간 지문자 인식 + 단어 조합 + NLP 자연어 처리
 - V2 모델 사용 (기존 + JSON keypoints 데이터 학습)
 - 자동 인식 (사용자 조작 불필요)
@@ -11,7 +8,6 @@ python common/recognition/realtime_recognition_wordV1.py  입력해서 실행함
 - NLP 자동 문장 변환 및 맞춤법 교정
 - 일정 시간 유지 시 자동 확정 (1초)
 - 키보드: 백스페이스(삭제), c(전체 초기화), s(문장 변환), q(종료)
-
 """
 
 import cv2
@@ -50,12 +46,12 @@ except ImportError:
 
 # NLP 모듈 import
 try:
-    from common.nlp import TextManager, KoreanSpellChecker
+    from common.nlp import HyemiTextManager, KoreanSpellChecker
     NLP_AVAILABLE = True
     print("✓ NLP 모듈 로드 완료")
 except ImportError as e:
     NLP_AVAILABLE = False
-    print(f"NLP 모듈을 찾을 수 없습니다: {e}")
+    print(f"⚠️  NLP 모듈을 찾을 수 없습니다: {e}")
     print("   NLP 없이 기본 모드로 실행합니다.")
 
 # ==================== 설정 ====================
@@ -285,7 +281,7 @@ def get_korean_font(size=30):
             except Exception as e:
                 continue
     
-    print(f"크기 {size}의 한글 폰트를 찾을 수 없어 기본 폰트를 사용합니다.")
+    print(f"⚠️  크기 {size}의 한글 폰트를 찾을 수 없어 기본 폰트를 사용합니다.")
     return ImageFont.load_default()
 
 font_large = get_korean_font(50)
@@ -355,11 +351,11 @@ def load_model():
         
         return model, idx_to_label, norm_mean, norm_std
     except FileNotFoundError:
-        print(f"모델 파일을 찾을 수 없습니다: {MODEL_PATH}")
-        print("models/photo_model/ 폴더에 모델 파일이 있는지 확인하세요.")
+        print(f"❌ 모델 파일을 찾을 수 없습니다: {MODEL_PATH}")
+        print("   models/photo_model/ 폴더에 모델 파일이 있는지 확인하세요.")
         sys.exit(1)
     except Exception as e:
-        print(f"모델 로드 중 오류: {e}")
+        print(f"❌ 모델 로드 중 오류: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
@@ -600,7 +596,7 @@ def find_and_init_camera(preferred_width=640, preferred_height=480):
             continue
     
     if not available_cameras:
-        print("\n사용 가능한 카메라를 찾을 수 없습니다.")
+        print("\n❌ 사용 가능한 카메라를 찾을 수 없습니다.")
         print("\n확인 사항:")
         print("  1. 카메라가 제대로 연결되어 있는지")
         print("  2. 다른 프로그램에서 사용 중이지 않은지")
@@ -646,7 +642,7 @@ def find_and_init_camera(preferred_width=640, preferred_height=480):
             cap.set(cv2.CAP_PROP_GAIN, 100)
             print("  ✓ 밝기 설정 완료")
         except:
-            print("밝기 설정 스킵 (지원 안 됨)")
+            print("  ⚠️  밝기 설정 스킵 (지원 안 됨)")
     
         # 워밍업
     print("워밍업 중...", end="", flush=True)
@@ -674,7 +670,7 @@ def main():
     if NLP_AVAILABLE:
         print("\n✓ NLP 모드: 활성화")
     else:
-        print("\nNLP 모드: 비활성화 (기본 모드)")
+        print("\n⚠️  NLP 모드: 비활성화 (기본 모드)")
     print("="*60 + "\n")
 
 # 모델 로드
@@ -687,12 +683,12 @@ tracker = JamoTracker(confirm_time=CONFIRM_TIME, min_confidence=MIN_CONFIDENCE)
 # NLP 모듈 초기화
 if NLP_AVAILABLE:
     try:
-        text_manager = TextManager()
+        text_manager = HyemiTextManager()
         spell_checker = KoreanSpellChecker()
         nlp_sentence = ""
         print("✓ NLP 모듈 초기화 완료")
     except Exception as e:
-        print(f"NLP 모듈 초기화 실패: {e}")
+        print(f"⚠️  NLP 모듈 초기화 실패: {e}")
         text_manager = None
         spell_checker = None
         nlp_sentence = ""

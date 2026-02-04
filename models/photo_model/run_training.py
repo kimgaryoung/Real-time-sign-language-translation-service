@@ -47,9 +47,9 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ==================== 설정 ====================
-DATA_DIR = "/Users/garyeong/project-1/사진_지문자"  # 기존 이미지 데이터
-KEYPOINTS_DIR = "/Users/garyeong/project-1/dataset/자체제작_사진_지문자_keypoints"  # 새 JSON keypoints 데이터
-MODEL_DIR = "/Users/garyeong/project-1/morpheme/photo_model"
+DATA_DIR = r"C:\Users\user\final_project\사진_지문자"  # 기존 이미지 데이터
+KEYPOINTS_DIR = r"C:\Users\user\final_project\dataset\자체제작_사진_지문자_keypoints"  # 새 JSON keypoints 데이터
+MODEL_DIR = r"C:\Users\user\final_project\morpheme\photo_model"
 
 # 키포인트 차원 설정
 POSE_DIM = 75      # 25 landmarks * 3
