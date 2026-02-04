@@ -1,0 +1,19 @@
+# 영상 데이터 폴더 전체 무시
+data/set/
+data/set/hyemi_video1/
+data/set/hyemi_video/
+data/set/hyemi_keypoints/
+data/set/hyemi_keypoints1/
+
+# 확장자별 무시
+*.mp4
+*.avi
+*.pt
+
+# 가상환경 및 캐시 무시
+venv/
+**/__pycache__/
+.DS_Store
+
+logs/
+*.log
